@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fruma — Morpho HyperEVM Liquidation Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#020617; --panel:rgba(255,255,255,.045); --panel-strong:rgba(255,255,255,.07);
+  --border:rgba(255,255,255,.09); --border-hi:rgba(139,92,246,.35);
+  --text:#F8FAFC; --muted:#94A3B8; --dim:#64748B;
+  --cyan:#22D3EE; --violet:#8B5CF6; --green:#22C55E; --red:#F87171; --amber:#FBBF24;
+  --mono:'JetBrains Mono',monospace; --head:'Space Grotesk',sans-serif; --body:'Inter',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{color-scheme:dark}
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:16px;line-height:1.6;min-height:100vh;overflow-x:hidden}
+/* aurora backdrop */
+.aurora{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.aurora::before,.aurora::after{content:"";position:absolute;border-radius:50%;filter:blur(120px);opacity:.16}
+.aurora::before{width:640px;height:640px;background:var(--violet);top:-240px;right:-160px}
+.aurora::after{width:560px;height:560px;background:var(--cyan);bottom:-260px;left:-180px;opacity:.10}
+.wrap{position:relative;z-index:1;max-width:1200px;margin:0 auto;padding:24px 20px 64px}
+/* header */
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:18px 22px;border:1px solid var(--border);border-radius:20px;background:var(--panel);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.brand{display:flex;align-items:center;gap:12px}
+.brand svg{flex:none}
+.brand h1{font-family:var(--head);font-size:1.5rem;font-weight:700;letter-spacing:.5px;background:linear-gradient(100deg,var(--cyan),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent}
+.brand small{display:block;color:var(--muted);font-size:.78rem;font-weight:400;letter-spacing:.3px}
+.status{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--dim);flex:none}
+.dot.live{background:var(--green);box-shadow:0 0 10px rgba(34,197,94,.8);animation:pulse 2s infinite}
+.dot.stale{background:var(--amber);box-shadow:0 0 8px rgba(251,191,36,.6)}
+@keyframes pulse{50%{opacity:.55}}
+@media (prefers-reduced-motion: reduce){.dot.live{animation:none}}
+/* stat grid */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin:22px 0}
+.stat{padding:18px 20px;border:1px solid var(--border);border-radius:18px;background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:border-color .2s}
+.stat:hover{border-color:var(--border-hi)}
+.stat .k{font-size:.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:1.1px;font-weight:500}
+.stat .v{font-family:var(--head);font-size:1.9rem;font-weight:700;margin-top:2px}
+.stat .v.mono{font-family:var(--mono);font-size:1.55rem}
+.stat .sub{font-size:.72rem;color:var(--dim);font-family:var(--mono)}
+.accent-c{color:var(--cyan)} .accent-v{color:#A78BFA} .accent-g{color:var(--green)} .accent-a{color:var(--amber)}
+/* panels */
+.grid2{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;align-items:start}
+@media(max-width:920px){.grid2{grid-template-columns:1fr}}
+.panel{border:1px solid var(--border);border-radius:20px;background:var(--panel);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);overflow:hidden;margin-bottom:14px}
+.panel h2{font-family:var(--head);font-size:.95rem;font-weight:600;letter-spacing:.4px;padding:16px 20px 12px;display:flex;align-items:center;gap:9px;color:var(--text)}
+.panel h2 svg{color:var(--cyan)}
+.panel h2 .count{margin-left:auto;font-family:var(--mono);font-size:.75rem;color:var(--muted);font-weight:400}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th{font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);text-align:left;padding:8px 14px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-weight:500}
+td{padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.04);font-family:var(--mono);color:var(--muted);white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr{transition:background .15s}
+tbody tr:hover{background:rgba(255,255,255,.03)}
+.addr{color:var(--cyan)}
+.badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:.68rem;font-weight:600;letter-spacing:.3px}
+.badge.win{background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.3)}
+.badge.miss{background:rgba(248,113,113,.1);color:var(--red);border:1px solid rgba(248,113,113,.25)}
+.badge.seen{background:rgba(251,191,36,.1);color:var(--amber);border:1px solid rgba(251,191,36,.25)}
+.bar-row{display:flex;align-items:center;gap:10px;padding:7px 20px;font-family:var(--mono);font-size:.78rem}
+.bar-row .lbl{width:110px;flex:none;overflow:hidden;text-overflow:ellipsis;color:var(--cyan)}
+.bar-row .bar{flex:1;height:8px;border-radius:99px;background:rgba(255,255,255,.05);overflow:hidden}
+.bar-row .fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--cyan),var(--violet))}
+.bar-row .n{width:44px;text-align:right;color:var(--muted)}
+.empty{padding:26px 20px;text-align:center;color:var(--dim);font-size:.85rem}
+.spark-wrap{padding:4px 20px 18px}
+canvas{width:100%;height:70px;display:block}
+footer{margin-top:26px;text-align:center;font-family:var(--mono);font-size:.72rem;color:var(--dim)}
+footer a{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--dim)}
+footer a:hover,footer a:focus{color:var(--cyan);outline:none}
+.scroll{max-height:430px;overflow-y:auto}
+.scroll::-webkit-scrollbar{width:8px}
+.scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:99px}
+</style>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"></div>
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 2v20M12 2l4 4M12 2L8 6M12 22l4-4M12 22l-4-4M2 12h20M2 12l4-4M2 12l4 4M22 12l-4-4M22 12l-4 4M5 5l14 14M5 19L19 5" stroke="url(#g)" stroke-width="1.4" stroke-linecap="round"/>
+      <defs><linearGradient id="g" x1="0" y1="0" x2="24" y2="24"><stop stop-color="#22D3EE"/><stop offset="1" stop-color="#8B5CF6"/></linearGradient></defs>
+    </svg>
+    <div><h1>FRUMA</h1><small>Morpho · HyperEVM · shadow monitor</small></div>
+  </div>
+  <div class="status">
+    <span class="dot" id="live-dot" role="status" aria-label="scanner status"></span>
+    <span id="live-text">connecting…</span>
+  </div>
+</header>
+
+<section class="stats" aria-label="key metrics">
+  <div class="stat"><div class="k">Markets</div><div class="v accent-c" id="s-markets">–</div></div>
+  <div class="stat"><div class="k">Borrowers tracked</div><div class="v" id="s-borrowers">–</div></div>
+  <div class="stat"><div class="k">Liquidations seen</div><div class="v accent-v" id="s-liqs">–</div><div class="sub" id="s-liqs-24h"></div></div>
+  <div class="stat"><div class="k">Hotlist coverage</div><div class="v accent-g" id="s-coverage">–</div><div class="sub">flagged before strike</div></div>
+  <div class="stat"><div class="k">Last scan</div><div class="v mono accent-a" id="s-lastscan">–</div><div class="sub" id="s-scanblock"></div></div>
+</section>
+
+<div class="panel">
+  <h2>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+    Liquidation activity <span class="count" id="spark-label"></span>
+  </h2>
+  <div class="spark-wrap"><canvas id="spark" role="img" aria-label="liquidations per hour chart"></canvas></div>
+</div>
+
+<div class="grid2">
+  <div class="panel">
+    <h2>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      Liquidation feed <span class="count" id="feed-count"></span>
+    </h2>
+    <div class="scroll">
+      <table aria-label="recent liquidations">
+        <thead><tr><th>Block</th><th>Borrower</th><th>Winner</th><th>Hotlisted</th></tr></thead>
+        <tbody id="feed-body"><tr><td colspan="4" class="empty">loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div>
+    <div class="panel">
+      <h2>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 21h8M12 17v4M6 3h12v6a6 6 0 0 1-12 0V3zM6 5H3v2a4 4 0 0 0 3 3.87M18 5h3v2a4 4 0 0 1-3 3.87"/></svg>
+        Winner leaderboard
+      </h2>
+      <div id="winners"><div class="empty">loading…</div></div>
+    </div>
+    <div class="panel">
+      <h2>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        Scanner
+      </h2>
+      <table aria-label="scanner details">
+        <tbody id="scanner-body"><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<footer>
+  data committed by the bot to <a href="https://github.com/Phlay13/fruma" rel="noopener">github.com/Phlay13/fruma</a> · refreshes every 2 min · phase 1: shadow monitoring
+</footer>
+</div>
+
+<script>
+const RAW = "https://raw.githubusercontent.com/Phlay13/fruma/main/data/";
+const API = "https://api.github.com/repos/Phlay13/fruma";
+const $ = id => document.getElementById(id);
+const short = a => a ? a.slice(0,6)+"…"+a.slice(-4) : "–";
+const fmtAgo = ms => { const m=Math.floor(ms/60000); if(m<1)return"just now"; if(m<60)return m+"m ago"; const h=Math.floor(m/60); if(h<48)return h+"h ago"; return Math.floor(h/24)+"d ago"; };
+
+async function load(){
+  try{
+    const bust = "?t=" + Math.floor(Date.now()/120000);
+    const [stateRes, logRes, commitRes] = await Promise.all([
+      fetch(RAW+"state.json"+bust),
+      fetch(RAW+"shadow-log.jsonl"+bust),
+      fetch(API+"/commits?per_page=1&path=data/state.json").then(r=>r.ok?r.json():null).catch(()=>null),
+    ]);
+    const state = await stateRes.json();
+    const lines = (await logRes.text()).trim().split("\n").filter(Boolean).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(Boolean);
+
+    // dedupe observed liquidations by tx+borrower
+    const seen = new Set();
+    const liqs = lines.filter(e=>e.type==="observed_liquidation").filter(e=>{
+      const k=e.tx+e.borrower; if(seen.has(k))return false; seen.add(k); return true;
+    });
+    const flagged = lines.filter(e=>e.type==="liquidatable_seen");
+
+    // stats
+    const markets = Object.keys(state.markets||{}).length;
+    const borrowers = Object.values(state.borrowers||{}).reduce((a,b)=>a+b.length,0);
+    $("s-markets").textContent = markets;
+    $("s-borrowers").textContent = borrowers;
+    $("s-liqs").textContent = liqs.length;
+    const dayAgo = Date.now()-86400000;
+    const recent = liqs.filter(e=>new Date(e.at).getTime()>dayAgo);
+    $("s-liqs-24h").textContent = recent.length+" in last 24h";
+    const hot = liqs.filter(e=>e.wasOnOurHotlist).length;
+    $("s-coverage").textContent = liqs.length? Math.round(100*hot/liqs.length)+"%" : "–";
+
+    // last scan from latest commit
+    if(commitRes && commitRes[0]){
+      const t = new Date(commitRes[0].commit.committer.date).getTime();
+      const ago = Date.now()-t;
+      $("s-lastscan").textContent = fmtAgo(ago);
+      const d = $("live-dot");
+      d.className = "dot " + (ago < 40*60000 ? "live" : "stale");
+      $("live-text").textContent = ago < 40*60000 ? "scanning" : "delayed";
+    }
+    $("s-scanblock").textContent = "block "+(state.scannedTo||0).toLocaleString();
+
+    // feed (latest 60)
+    const rows = liqs.slice(-60).reverse().map(e=>{
+      const b = e.wasOnOurHotlist ? '<span class="badge win">yes</span>' : '<span class="badge miss">no</span>';
+      return `<tr><td>${(e.block||0).toLocaleString()}</td><td class="addr">${short(e.borrower)}</td><td>${short(e.winner)}</td><td>${b}</td></tr>`;
+    }).join("");
+    $("feed-body").innerHTML = rows || '<tr><td colspan="4" class="empty">no liquidations observed yet</td></tr>';
+    $("feed-count").textContent = liqs.length ? "last "+Math.min(60,liqs.length)+" of "+liqs.length : "";
+
+    // winners
+    const tally = {};
+    liqs.forEach(e=>{ tally[e.winner]=(tally[e.winner]||0)+1; });
+    const top = Object.entries(tally).sort((a,b)=>b[1]-a[1]).slice(0,7);
+    const max = top.length? top[0][1] : 1;
+    $("winners").innerHTML = top.length ? top.map(([w,n])=>
+      `<div class="bar-row"><span class="lbl">${short(w)}</span><span class="bar"><span class="fill" style="width:${Math.round(100*n/max)}%"></span></span><span class="n">${n}</span></div>`
+    ).join("") + '<div style="height:12px"></div>' : '<div class="empty">no data yet</div>';
+
+    // scanner panel
+    const flaggedRecent = flagged.filter(e=>new Date(e.at).getTime()>dayAgo).length;
+    $("scanner-body").innerHTML = `
+      <tr><td>cursor block</td><td class="addr">${(state.scannedTo||0).toLocaleString()}</td></tr>
+      <tr><td>liquidatable sightings 24h</td><td>${flaggedRecent}</td></tr>
+      <tr><td>log entries</td><td>${lines.length.toLocaleString()}</td></tr>
+      <tr><td>mode</td><td><span class="badge seen">shadow · read-only</span></td></tr>`;
+
+    // sparkline: liqs per hour, last 48h
+    drawSpark(liqs);
+  }catch(err){
+    $("live-text").textContent = "error loading data";
+    $("live-dot").className = "dot";
+  }
+}
+
+function drawSpark(liqs){
+  const c = $("spark"), dpr = window.devicePixelRatio||1;
+  const W = c.clientWidth, H = 70;
+  c.width = W*dpr; c.height = H*dpr;
+  const x = c.getContext("2d"); x.scale(dpr,dpr);
+  const HOURS = 48, now = Date.now();
+  const buckets = new Array(HOURS).fill(0);
+  liqs.forEach(e=>{
+    const h = Math.floor((now - new Date(e.at).getTime())/3600000);
+    if(h>=0 && h<HOURS) buckets[HOURS-1-h]++;
+  });
+  const max = Math.max(...buckets,1);
+  const bw = W/HOURS;
+  const grad = x.createLinearGradient(0,0,W,0);
+  grad.addColorStop(0,"#22D3EE"); grad.addColorStop(1,"#8B5CF6");
+  x.fillStyle = grad;
+  buckets.forEach((n,i)=>{
+    const bh = n? Math.max(3,(n/max)*(H-8)) : 2;
+    x.globalAlpha = n? .9 : .18;
+    x.beginPath();
+    x.roundRect(i*bw+1, H-bh, bw-2, bh, 2);
+    x.fill();
+  });
+  x.globalAlpha = 1;
+  $("spark-label").textContent = "last 48h · peak "+max+"/hr";
+}
+
+load();
+setInterval(load, 120000);
+</script>
+</body>
+</html>
