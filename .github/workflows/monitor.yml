@@ -1,0 +1,38 @@
+name: fruma-monitor
+on:
+  schedule:
+    - cron: "3-58/5 * * * *" # every 5 min, off the :00 rush
+  workflow_dispatch: {}
+
+concurrency:
+  group: fruma-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install deps
+        run: npm ci --no-audit --no-fund
+      - name: Run scan window (4 min)
+        env:
+          RPC_URL: ${{ secrets.RPC_URL }}
+          MAX_RUNTIME_MS: "240000"
+          POLL_INTERVAL_MS: "5000"
+        run: npx ts-node src/engine.ts
+      - name: Commit state back
+        run: |
+          git config user.name "fruma-bot"
+          git config user.email "fruma-bot@users.noreply.github.com"
+          git pull --rebase --autostash || true
+          git add -f data/state.json data/shadow-log.jsonl 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "state: scan $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+          git push || (git pull --rebase --autostash && git push)

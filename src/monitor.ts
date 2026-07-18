@@ -80,6 +80,24 @@ export function borrowerCount(): number {
 
 // ── Event scanning ────────────────────────────────────────────────────────────
 
+// Markets created before our lookback window: fetch params directly from chain.
+async function backfillMarket(marketId: string): Promise<void> {
+  try {
+    const morpho = new Contract(MORPHO, MORPHO_ABI, undefined);
+    const [loanToken, collateralToken, oracle, irm, lltv] = await withRetry((p) =>
+      (morpho.connect(p) as Contract).idToMarketParams(marketId)
+    );
+    if (loanToken === "0x0000000000000000000000000000000000000000") return;
+    state.markets[marketId] = {
+      id: marketId, loanToken, collateralToken, oracle, irm, lltv: lltv.toString(),
+    };
+    if (!state.borrowers[marketId]) state.borrowers[marketId] = [];
+    log(`market backfilled ${marketId.slice(0, 10)}… lltv=${Number(lltv) / 1e16}%`);
+  } catch {
+    /* transient RPC issue — next Borrow event on this market retries */
+  }
+}
+
 async function scanRange(from: number, to: number): Promise<void> {
   const logs = await withLogsRetry((p) =>
     p.getLogs({
@@ -107,6 +125,8 @@ async function scanRange(from: number, to: number): Promise<void> {
       const onBehalf = getAddress("0x" + l.topics[3].slice(26));
       const list = (state.borrowers[marketId] ??= []);
       if (!list.includes(onBehalf)) list.push(onBehalf);
+      // Market created before our lookback window? Backfill its params from chain.
+      if (!state.markets[marketId]) await backfillMarket(marketId);
     } else if (l.topics[0] === TOPIC_LIQUIDATE) {
       // Shadow-log every real liquidation: who won, how big. Phase 1's core output.
       const caller = getAddress("0x" + l.topics[2].slice(26));
@@ -128,7 +148,7 @@ async function scanRange(from: number, to: number): Promise<void> {
   }
 }
 
-export async function bootstrap(deployBlock: number): Promise<void> {
+export async function bootstrap(deployBlock: number, deadlineMs = 0): Promise<void> {
   loadState();
   const head = await withRetry((p) => p.getBlockNumber());
   let from = Math.max(state.scannedTo + 1, deployBlock);
@@ -136,11 +156,20 @@ export async function bootstrap(deployBlock: number): Promise<void> {
 
   log(`bootstrap: scanning blocks ${from}→${head} (${head - from} blocks, chunk ${LOG_CHUNK})`);
   while (from <= head) {
+    if (deadlineMs > 0 && Date.now() > deadlineMs) {
+      warn(`bootstrap deadline hit at block ${from} — saving progress, will resume next run`);
+      break;
+    }
     const to = Math.min(from + LOG_CHUNK - 1, head);
     await scanRange(from, to);
     state.scannedTo = to;
     from = to + 1;
     if (to % (LOG_CHUNK * 20) < LOG_CHUNK) saveState(); // periodic checkpoint
+  }
+  saveState();
+  // repair pass: any market we hold borrowers for but never saw created
+  for (const id of Object.keys(state.borrowers)) {
+    if (!state.markets[id]) await backfillMarket(id);
   }
   saveState();
   await enrichMarkets();

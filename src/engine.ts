@@ -12,14 +12,20 @@ import { log, warn, shadow } from "./utils/logger";
 // as soon as they emit any new Borrow event; deep history can be backfilled later.
 const LOOKBACK_BLOCKS = 900_000; // ~10 days of HyperEVM blocks (~1s small blocks)
 
+// CI mode (GitHub Actions): run a bounded scan window then exit cleanly so the
+// workflow can commit state back. Unset = run forever (JustRunMy / local).
+const MAX_RUNTIME_MS = Number(process.env.MAX_RUNTIME_MS ?? "0");
+
 async function main(): Promise<void> {
   log(`Fruma starting — ${CHAIN_TAG}, Morpho ${MORPHO}`);
   log(`mode: SHADOW MONITOR (read-only, DRY_RUN=${DRY_RUN}) — ${rpcSummary()}`);
 
   const head = await withRetry((p) => p.getBlockNumber());
-  await bootstrap(Math.max(1, head - LOOKBACK_BLOCKS));
+  const ciDeadline = MAX_RUNTIME_MS > 0 ? Date.now() + Math.floor(MAX_RUNTIME_MS * 0.8) : 0;
+  await bootstrap(Math.max(1, head - LOOKBACK_BLOCKS), ciDeadline);
 
   let cycle = 0;
+  const startedAt = Date.now();
   for (;;) {
     const started = Date.now();
     try {
@@ -53,6 +59,10 @@ async function main(): Promise<void> {
       warn(`cycle error: ${err instanceof Error ? err.message.slice(0, 160) : err}`);
     }
     const elapsed = Date.now() - started;
+    if (MAX_RUNTIME_MS > 0 && Date.now() - startedAt > MAX_RUNTIME_MS) {
+      log(`CI window done (${cycle} cycles) — exiting for state commit`);
+      process.exit(0);
+    }
     await new Promise((r) => setTimeout(r, Math.max(500, POLL_INTERVAL_MS - elapsed)));
   }
 }
